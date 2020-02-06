@@ -1,0 +1,1 @@
+GLIMPSE_SHAPE = (16, 16)
