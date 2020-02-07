@@ -13,9 +13,9 @@ class ImgEncoder(nn.Module):
         self.num_channels = num_channels
         self.elu = nn.ELU()
         
-        self.conv_layers = []
+        conv_layers = []
         for i in range(len(self.num_channels) - 1):
-            self.conv_layers.append(nn.Sequential(
+            conv_layers.append(nn.Sequential(
                 nn.Conv2d(
                     in_channels=self.num_channels[i],
                     out_channels=self.num_channels[i + 1],
@@ -25,7 +25,7 @@ class ImgEncoder(nn.Module):
                 nn.BatchNorm2d(num_features=self.num_channels[i + 1]),
                 self.elu,
             ))
-        self.conv_layers = nn.Sequential(*self.conv_layers)
+        self.conv_layers = nn.Sequential(*conv_layers)
         self.out_proj = nn.Sequential(
             nn.Conv2d(
                 in_channels=self.num_channels[-1],
@@ -66,14 +66,16 @@ class FG(nn.Module):
             kernel_size=(1, 1),
         )
         self.encoder = ImgEncoder()
-        
+
     def forward(self, img):
+        xs = self.get_glimpses(img)
+
+    def get_glimpses(self, img):
         bsz, C, H, W = img.size()
         image_shape = torch.tensor((H, W), dtype=torch.float, device=img.device)
         
         img_feats = self.encoder(img)
         Hp, Wp = img_feats.size()[-2:]
-        print(Hp, Wp, img_feats.size())
         fmap_shape = torch.tensor((Hp, Wp), dtype=torch.float, device=img.device)
         ch, cw = image_shape / fmap_shape #  pseudo-receptive field
 
@@ -112,7 +114,6 @@ class FG(nn.Module):
         # pseudo-receptive field in the original image for each cell of the
         # feature map
         ij_grid = torch.stack(torch.meshgrid((torch.arange(0, 1, 1 / Hp), torch.arange(0, 1, 1 / Wp))), dim=-1)
-        print(ij_grid.size())
         z_center_wrt_img = (ij_grid.unsqueeze(0) + z_shift_wrt_img)
         # z_center_wrt_img__11: transformed values of centers relative 
         # to the image to range (-1, 1) to use with torch.nn.functional.make_grid

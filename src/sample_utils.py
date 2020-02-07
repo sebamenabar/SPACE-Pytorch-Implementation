@@ -4,6 +4,9 @@ def sample_gaussean(mean, loc):
     dist = torch.distributions.normal.Normal(mean, loc)
     return dist.rsample()
 
+def sample_gaussean_sp(mean, log_loc):
+    return sample_gaussean(mean, torch.nn.functional.softplus(log_loc))
+
 def sample_bernoulli(p_logits, hard=True, clamp=False, temperature=1):
     dist = torch.distributions.RelaxedBernoulli(temperature=1, logits=p_logits)
     obj_prob = dist.rsample(p_logits.size()).to(device=p_logits.device)
