@@ -10,8 +10,9 @@ Note: This is a highly opinionated (by me) implementation from what I can unders
     * [x] $Z$ Sampling
     * [x] Construct $z_{where}$
     * [x] Extract glimpses with a Spatial Transformer
-    * [ ] Glimpse Encoder
-    * [ ] Foreground mask and appearance
+    * [x] Glimpse Encoder
+    * [ ] Glimpse Decoder
+      * [ ] Foreground mask and appearance
     * [ ] Compute weights for each component
     * [ ] Compute global weighted mask and foreground appearance
 * [ ] Background Inference
