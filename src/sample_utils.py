@@ -9,7 +9,7 @@ def sample_gaussean_sp(mean, log_loc):
 
 def sample_bernoulli(p_logits, hard=True, clamp=False, temperature=1):
     dist = torch.distributions.RelaxedBernoulli(temperature=1, logits=p_logits)
-    obj_prob = dist.rsample(p_logits.size()).to(device=p_logits.device)
+    obj_prob = dist.rsample() # .to(device=p_logits.device)
     if hard: # Use ST-trick
         obj_prob_hard = (obj_prob >= 0.5).to(dtype=torch.float)
         return (obj_prob_hard - obj_prob).detach() + obj_prob, obj_prob
