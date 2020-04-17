@@ -255,17 +255,27 @@ class negDotLoss:
 
     def compute_loss(self, tgts, Pred, GT):
         Loss = odict()
+        bsz, nobjs = GT[tgts[0]].size()[:2]
         for tgt in tgts:
-            Loss[tgt] = torch.mean(-torch.bmm(GT[tgt].view(GT[tgt].shape[0],1,2).float(), Pred[tgt].view(Pred[tgt].shape[0],2,1).float()))
+            gt = GT[tgt].view(bsz, nobjs, 1, 2).float()
+            pred = Pred[tgt].view(bsz, nobjs, 2, 1).float()
+
+            Loss[tgt] = -torch.matmul(gt, pred).sum(1).mean()
+            # Loss[tgt] = -torch.bmm(GT[tgt].view(GT[tgt].shape[0],1,2).float(), Pred[tgt].view(Pred[tgt].shape[0],2,1).float())
         return Loss
 
 
 class CELoss:
     def __init__(self):
-        self.CELoss = nn.CrossEntropyLoss().cuda()
+        self.CELoss = nn.CrossEntropyLoss(reduction='none')
 
     def compute_loss(self, tgts, Pred, GT):
         Loss = odict()
+        bsz, nobjs = GT[tgts[0]].size()[:2]
         for tgt in tgts:
-            Loss[tgt] = self.CELoss(Pred[tgt].view(Pred[tgt].size()[0],4), GT[tgt].view(Pred[tgt].size()[0],))
+            pred = Pred[tgt].view(bsz, nobjs, 4).transpose(1, 2)
+            gt = GT[tgt].view(bsz, nobjs)
+
+            Loss[tgt] = self.CELoss(pred, gt).sum(1).mean()
+            # Loss[tgt] = self.CELoss(Pred[tgt].view(Pred[tgt].size()[0],4), GT[tgt].view(Pred[tgt].size()[0],))
         return Loss
