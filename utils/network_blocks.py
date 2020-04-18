@@ -226,6 +226,8 @@ class ConvBlock(nn.Module):
                 EqualConv2d(out_channel, out_channel, kernel2, padding=pad2),
                 nn.LeakyReLU(0.2),
             )
+            # self.conv[1].weight.normal_(1, 0.02)
+            # self.conv[1].bias.zeros_()
         elif instance_norm and last==False:
             self.conv = nn.Sequential(
                 EqualConv2d(in_channel, out_channel, kernel1, padding=pad1),
@@ -235,6 +237,10 @@ class ConvBlock(nn.Module):
                 nn.InstanceNorm2d(out_channel),
                 nn.LeakyReLU(0.2),
             )            
+            # self.conv[1].weight.normal_(1, 0.02)
+            # self.conv[1].bias.zeros_()
+            # self.conv[4].weight.normal_(1, 0.02)
+            # self.conv[4].bias.zeros_()
         else:
             self.conv = nn.Sequential(
                 EqualConv2d(in_channel, out_channel, kernel1, padding=pad1),
@@ -260,7 +266,7 @@ class negDotLoss:
             gt = GT[tgt].view(bsz, nobjs, 1, 2).float()
             pred = Pred[tgt].view(bsz, nobjs, 2, 1).float()
 
-            Loss[tgt] = -torch.matmul(gt, pred).sum(1).mean()
+            Loss[tgt] = -torch.matmul(gt, pred)
             # Loss[tgt] = -torch.bmm(GT[tgt].view(GT[tgt].shape[0],1,2).float(), Pred[tgt].view(Pred[tgt].shape[0],2,1).float())
         return Loss
 
@@ -276,6 +282,6 @@ class CELoss:
             pred = Pred[tgt].view(bsz, nobjs, 4).transpose(1, 2)
             gt = GT[tgt].view(bsz, nobjs)
 
-            Loss[tgt] = self.CELoss(pred, gt).sum(1).mean()
+            Loss[tgt] = self.CELoss(pred, gt)
             # Loss[tgt] = self.CELoss(Pred[tgt].view(Pred[tgt].size()[0],4), GT[tgt].view(Pred[tgt].size()[0],))
         return Loss

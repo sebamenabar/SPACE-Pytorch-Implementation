@@ -84,10 +84,11 @@ class EqualLinear(nn.Module):
         super().__init__()
 
         linear = nn.Linear(in_dim, out_dim)
-        linear.weight.data.normal_()
+        linear.weight.data.normal_(0, 0.02)
         linear.bias.data.zero_()
 
-        self.linear = equal_lr(linear)
+        # self.linear = equal_lr(linear)
+        self.linear = torch.nn.utils.spectral_norm(linear)
 
     def forward(self, input):
         return self.linear(input)
@@ -120,9 +121,10 @@ class EqualConv2d(nn.Module):
         super().__init__()
 
         conv = nn.Conv2d(*args, **kwargs)
-        conv.weight.data.normal_()
+        conv.weight.data.normal_(0, 0.02)
         conv.bias.data.zero_()
-        self.conv = equal_lr(conv)
+        # self.conv = equal_lr(conv)
+        self.conv = torch.nn.utils.spectral_norm(conv)
 
     def forward(self, input):
         return self.conv(input)                        

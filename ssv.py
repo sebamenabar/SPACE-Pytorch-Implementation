@@ -122,7 +122,7 @@ class VPNet(nn.Module):
         Creates a head with fc layer and outputs for magnitute of [sine, cosine] and direction {--, -+, +-, ++}
         """
         seq_fc8 = nn.Sequential(
-            EqualLinear(in_size, num_fc), nn.ReLU(inplace=True), nn.Dropout(),
+            EqualLinear(in_size, num_fc), nn.LeakyReLU(0.2, inplace=True), nn.Dropout(),
         )
         seq_ccss = EqualLinear(num_fc, 2)  # magnitude of sin and cos
         seq_sgnc = EqualLinear(num_fc, 4)  # direction/quadrant of sine and cos
@@ -159,7 +159,7 @@ class VPNet(nn.Module):
         # FC layer for reconstruction of z
         self.fg_z_linear = EqualLinear(256, fg_code_dim)
         self.fg_loc_head = nn.Sequential(
-            EqualLinear(256, 128), nn.ReLU(inplace=True), nn.Dropout(),
+            EqualLinear(256, 128), nn.LeakyReLU(0.2, inplace=True), nn.Dropout(),
         )
         self.presence_linear = EqualLinear(128, 1)
         self.scale_linear = EqualLinear(128, 1)

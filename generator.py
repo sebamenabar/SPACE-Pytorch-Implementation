@@ -245,7 +245,8 @@ class Generator(nn.Module):
             h = inst_norm(h)
             h = self.lrelu(h)
 
-        h = torch.sigmoid(self.out_conv(h))
+        h = self.out_conv(h)
+        # h = torch.sigmoid(self.out_conv(h))
 
         if return_voxel:
             return h, composed_scene
