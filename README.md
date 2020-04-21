@@ -5,6 +5,14 @@ This is an attempt to replicate SPACE: Unsupervised Object-Oriented Scene Repres
 
 A model that combines the Self-Supervised Viewpoint Learning from Image Collections (SSV) (http://arxiv.org/abs/2004.01793) encoder and the SPACE decoder is currently working on the CLEVR dataset with a very simple train look with few constraints.
 
+Current used files are:
+	- space-only.ipynb
+	- utils/network_blocks.py
+	- utils/space_modules.py
+	- ssv.py
+	- extern/network_blocks.py
+	- clevr_dataset.py
+
 For training and results please see the space-only notebook.
 
 ![space-clevr][images/space-clevr.png]
