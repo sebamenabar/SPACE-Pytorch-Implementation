@@ -130,3 +130,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+=======
+*__pycache__*
+*.ipynb_checkpoints/
