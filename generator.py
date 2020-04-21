@@ -116,7 +116,7 @@ class ObjectGenerator(nn.Module):
             bsz, _ = z.size()
             num_objs = 1
         if view_in is not None and len(view_in.size()) == 3:
-            view_in = view_in.view(bsz * num_objs, 9)
+            view_in = view_in.flatten(0, 1).view(bsz * num_objs, 9) # Without the flatten in raised errors
         if num_objs == 0:
             return torch.zeros(bsz, num_objs, 64, 16, 16, 16, device=z.device)
 
@@ -144,11 +144,11 @@ class ObjectGenerator(nn.Module):
 class Generator(nn.Module):
     def __init__(
         self,
-        z_dim_bg=32,
-        z_dim_fg=64,
+        z_dim_bg=64,
+        z_dim_fg=128,
         w_dim_bg=256,
         w_dim_fg=512,
-        filters=[128, 64, 32],
+        filters=[256, 128, 64],
         ks=[4, 4, 4],
         strides=[2, 2, 2],
         upconv_paddings=[1, 1, 1],

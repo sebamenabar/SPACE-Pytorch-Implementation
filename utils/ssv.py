@@ -14,12 +14,98 @@ from torch.nn import functional as F
 from torch.autograd import Variable, grad
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, utils
+from torch.nn.functional import affine_grid, grid_sample
 import torchvision
 from torchvision import models
 
 from collections import OrderedDict as odict
 import os
 import imageio
+
+
+def rsample_gaussean(mean, loc):
+    dist = torch.distributions.normal.Normal(mean, loc)
+    return dist.rsample()
+
+
+def stn(img, center, scale, out_shape, inverse=False):
+    bsz, C, H, W = img.size()
+    theta_h, theta_w = scale.view(-1, 2).split(1, -1)
+    theta_tx, theta_ty = center.view(-1, 2).split(1, -1)
+    num_glimpses = theta_h.size(0) // bsz
+
+    # transformation, zero values are crop skewness, for now without skew
+    theta = torch.cat(
+        [
+            theta_w,
+            torch.zeros_like(theta_w),
+            theta_ty,
+            torch.zeros_like(theta_w),
+            theta_h,
+            theta_tx,
+        ],
+        dim=-1,
+    )
+    theta = theta.view(-1, 2, 3)
+
+    if inverse:
+        t = torch.tensor([0.0, 0.0, 1.0], device=theta.device).repeat(
+            theta.size(0), 1, 1
+        )
+        t = torch.cat([theta, t], dim=-2)
+        t = t.inverse()
+        theta = t[:, :2, :]
+
+    grid = affine_grid(theta, (theta.size(0), C, *out_shape), align_corners=False)
+    # repeat each image Hp * Wp times for each cropping
+    _img = img.unsqueeze(1).expand(-1, num_glimpses, -1, -1, -1)
+    _img = _img.reshape(-1, C, H, W)
+    xs = grid_sample(_img, grid, align_corners=False)
+    return xs.view(bsz, num_glimpses, C, *out_shape)
+
+
+def calculate_center_scale_wrt_img(img, shift_01, scale_01, anchor_shape=(64, 64)):
+    # img: (bsz, 3, 128, 128)
+    # scale: (bsz, 16, 16, 2)
+    # shift: (bsz, 16, 16, 2)
+    bsz, C, H, W = img.size()
+    anchor_shape = torch.as_tensor(anchor_shape, device=img.device)
+    image_shape = torch.tensor((H, W), dtype=torch.float, device=scale_01.device)
+    Hp, Wp = scale_01.size()[1:3]
+    fmap_shape = torch.tensor((Hp, Wp), dtype=torch.float, device=scale_01.device)
+
+    scale_wrt_anchor = scale_01
+    shift_wrt_fmap = shift_01
+
+    scale_abs = scale_wrt_anchor * anchor_shape
+    scale_wrt_img = scale_abs / image_shape
+    shift_wrt_img = shift_wrt_fmap / fmap_shape
+
+    # z_scale_abs: size in pixels, according to SPAIR, using a
+    # constant anchor instead of a possible
+    # variable image size is better
+    scale_abs = scale_wrt_anchor * anchor_shape
+    scale_wrt_img = (
+        scale_abs / image_shape
+    )  # size in range (0, GLIMPSE_SIZE / IMAGE_SIZE)
+
+    # ij_grid: coordinate map with values (x, y) in ((0, 1), (0, 1)) where
+    # 0 is the left/top-most position of the image and 1 the right/bottom-most
+    # each coordinate denotes the top-left corner of the projected
+    # pseudo-receptive field in the original image for each cell of the
+    # feature map
+    ij_grid = torch.stack(
+        torch.meshgrid(
+            (torch.linspace(0, 1 - 1 / Hp, Hp), torch.linspace(0, 1 - 1 / Wp, Wp))
+        ),
+        dim=-1,
+    ).to(img.device)
+    center_wrt_img = ij_grid.unsqueeze(0) + shift_wrt_img
+    # z_center_wrt_img__11: transformed values of centers relative
+    # to the image to range (-1, 1) to use with torch.nn.functional.make_grid
+    center_wrt_img__11 = (center_wrt_img * 2) - 1
+
+    return center_wrt_img__11, scale_wrt_img
 
 
 def get_topk_and_complement_indices(score, k=10):
@@ -29,12 +115,15 @@ def get_topk_and_complement_indices(score, k=10):
 
     return (values, indices), topk_complement
 
+
 def expand_indices(indices, num_reps):
     return indices.unsqueeze(-1).expand(*indices.size(), num_reps)
+
 
 def st_trick(probs):
     obj_prob_hard = (probs >= 0.5).to(dtype=torch.float)
     return (obj_prob_hard - probs).detach() + probs
+
 
 def sample_bernoulli(probs=None, logits=None, hard=False, temperature=1):
     dist = torch.distributions.RelaxedBernoulli(
@@ -398,4 +487,3 @@ class Saver:
     def save_all_models(self, epoch):
         for modelname in self.model_list.keys():
             self.save_model(modelname, epoch)
-

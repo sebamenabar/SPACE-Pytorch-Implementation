@@ -132,47 +132,64 @@ class VPNet(nn.Module):
 
         return seq_fc8, seq_ccss, seq_sgnc
 
-    def __init__(self, bg_code_dim=32, fg_code_dim=64, instance_norm=False):
+    def __init__(self, bg_code_dim=64, fg_code_dim=128, instance_norm=False):
         super().__init__()
 
-        self.from_rgb = EqualConv2d(5, 64, 1)
+        self.from_rgb = EqualConv2d(5, 32, 1)
         self.progression = nn.ModuleList(
             [
+                ConvBlock(32, 64, 3, 1, instance_norm=instance_norm),
                 ConvBlock(64, 128, 3, 1, instance_norm=instance_norm),
                 ConvBlock(128, 128, 3, 1, instance_norm=instance_norm),
-                ConvBlock(128, 256, 3, 1, instance_norm=instance_norm),
-                ConvBlock(256, 256, 3, 1, instance_norm=instance_norm),
+                # ConvBlock(256, 256, 3, 1, instance_norm=instance_norm),
                 # ConvBlock(256, 512, 3, 1, instance_norm=instance_norm),
             ]
         )
         self.class_trunk = nn.ModuleList(
             [
-                ConvBlock(256, 128, 3, 1, instance_norm=instance_norm),
-                ConvBlock(129, 128, 3, 1, 4, 0, last=True, instance_norm=instance_norm),
+                ConvBlock(128, 256, 4, 1, 4, 0, instance_norm=instance_norm),
+                ConvBlock(257, 256, 4, 1, 4, 0, last=True, instance_norm=instance_norm),
+            ]
+        )
+        self.fg_trunk = nn.ModuleList(
+            [
+                ConvBlock(130, 256, 4, 1, 4, 1, instance_norm=instance_norm),
+                ConvBlock(256, 256, 3, 1, 3, 1, last=True, instance_norm=instance_norm),
             ]
         )
 
         #  BG classification
-        self.bg_z_linear = EqualLinear(128, bg_code_dim)
-        self.class_linear = EqualLinear(128, 1)
-
-        # FC layer for reconstruction of z
-        self.fg_z_linear = EqualLinear(256, fg_code_dim)
-        self.fg_loc_head = nn.Sequential(
-            EqualLinear(256, 128), nn.LeakyReLU(0.2, inplace=True), nn.Dropout(),
-        )
-        self.presence_linear = EqualLinear(128, 1)
-        self.scale_linear = EqualLinear(128, 1)
-        self.txtz_linear = EqualLinear(128, 2)
+        self.bg_z_linear = EqualLinear(256, bg_code_dim)
+        self.class_linear = EqualLinear(256, 1)
 
         # Head for viewpoint estimation
-        (
-            self.head_fc_a,
-            self.head_x2_y2_mag_a,
-            self.head_sin_cos_direc_a,
-        ) = self.head_seq(256, num_fc=128)
+        # (
+        #     self.head_fc_a,
+        #     self.head_x2_y2_mag_a,
+        #     self.head_sin_cos_direc_a,
+        # ) = self.head_seq(512, num_fc=512)
         # self.head_fc_e, self.head_x2_y2_mag_e, self.head_sin_cos_direc_e = self.head_seq(512, num_fc=256)
         # self.head_fc_t, self.head_x2_y2_mag_t, self.head_sin_cos_direc_t = self.head_seq(512, num_fc=256)
+        # FC layer for reconstruction of z
+        # self.fg_z_linear = EqualLinear(512, fg_code_dim)
+        self.loc_dim = 512
+        self.fg_loc_head = nn.Sequential(
+            EqualLinear(256, self.loc_dim), nn.LeakyReLU(0.2, inplace=True), nn.Dropout(),
+        )
+        self.presence_linear = nn.Linear(self.loc_dim, 1)
+        self.presence_linear.weight.data.zero_()
+        self.presence_linear.bias.data.zero_()
+        self.scale_linear = nn.Linear(self.loc_dim, 2)
+        self.scale_linear.weight.data.zero_()
+        self.scale_linear.bias.data.fill_(0.5)
+        self.shift_linear = nn.Linear(self.loc_dim, 2)
+        self.shift_linear.weight.data.zero_()
+        self.shift_linear.bias.data.fill_(0.5)
+        self.depth_linear = nn.Linear(self.loc_dim, 1)
+        self.depth_linear.weight.data.zero_()
+        self.depth_linear.bias.data.fill_(0.0)
+        # self.tx_linear = EqualLinear(512, 2)
+        # self.tz_linear = EqualLinear(512, 2)
 
         # For the magnitute part
         self.logsoftmax = nn.LogSoftmax(dim=-1)  # .cuda()
@@ -196,17 +213,24 @@ class VPNet(nn.Module):
             0,
         )
         grid = grid.unsqueeze(0).expand(input.size(0), -1, -1, -1).to(input.device)
+        if self.training:
+            grid = grid + torch.empty_like(grid).normal_(0, 0.01)  # to reduce overfit
         out = torch.cat((input, grid), 1)
         out = self.from_rgb(out)
 
         for i, block in enumerate(self.progression):
             out = block(out)
             # if i > 0:
+            # if i < (len(self.progression) - 1):
             out = F.interpolate(
                 out, scale_factor=0.5, mode="bilinear", align_corners=False
             )
 
-        class_out = self.class_trunk[0](out)
+        class_out = out
+        # class_out = F.interpolate(
+        #         out, scale_factor=0.5, mode="bilinear", align_corners=False
+        #     )
+        class_out = self.class_trunk[0](class_out)
         class_out = F.interpolate(
             class_out, scale_factor=0.5, mode="bilinear", align_corners=False
         )
@@ -217,9 +241,27 @@ class VPNet(nn.Module):
         )
         class_out = torch.cat([class_out, mean_std], 1)
         class_out = self.class_trunk[1](class_out)
+        class_out = F.interpolate(
+            class_out, scale_factor=0.5, mode="bilinear", align_corners=False
+        )
 
         # Output from trunk.
-        fg = out.permute(0, 2, 3, 1).flatten(1, 2)
+        grid = torch.stack(
+            torch.meshgrid(
+                (
+                    torch.linspace(-1, 1, out.size(2)),
+                    torch.linspace(-1, 1, out.size(3)),
+                )
+            ),
+            0,
+        )
+        grid = grid.unsqueeze(0).expand(out.size(0), -1, -1, -1).to(out.device)
+        if self.training:
+            grid = grid + torch.empty_like(grid).normal_(0, 0.01)  # to reduce overfit
+        fg = torch.cat((out, grid), 1)
+        fg = self.fg_trunk[0](fg)
+        fg = self.fg_trunk[1](fg)
+        fg = fg.permute(0, 2, 3, 1)
         bg = class_out.squeeze(2).squeeze(2)
 
         batchsize = fg.size(0)
@@ -230,88 +272,59 @@ class VPNet(nn.Module):
         z_bg = self.bg_z_linear(bg)
 
         # z output
-        fg_loc = self.fg_loc_head(fg)
-        presence_logits = self.presence_linear(fg_loc).squeeze(-1)
-        # presence = torch.sigmoid(presence)
-        # if self.training and sample_p:
-        #     sampled_presence, sampled_presence_soft = ssv.sample_bernoulli(
-        #         probs=presence, hard=False, temperature=temperature
-        #     )
-        #     (
-        #         (topk_p_values, topk_p_indices),
-        #         topk_complement,
-        #     ) = get_topk_and_complement_indices(sampled_presence, k)
-        #     topk_p_values = ssv.st_trick(topk_p_values)
-        # else:
-        #     (
-        #         (topk_p_values, topk_p_indices),
-        #         topk_complement,
-        #     ) = get_topk_and_complement_indices(presence, k)
-        #     sampled_presence = None
-
-        # fg_topk = fg
-        # fg_topk = fg_topk * topk_p_values.unsqueeze(-1)
-        # fg_loc_topk = fg_loc.gather(1, expand_indices(topk_p_indices, fg_loc.size(-1)))
-        # fg_loc_topk = fg_loc_topk * topk_p_values.unsqueeze(-1)
-
-        z_fg = self.fg_z_linear(fg)
-        # z_fg_topk = z_fg.gather(1, expand_indices(topk_p_indices, z_fg.size(-1))) * topk_p_values.unsqueeze(-1)
-        scale = torch.sigmoid(self.scale_linear(fg_loc))
-        # scale_topk = scale.gather(1, expand_indices(topk_p_indices, scale.size(-1))) * topk_p_values.unsqueeze(-1)
-        txtz = torch.tanh(self.txtz_linear(fg_loc))
-        # txtz_topk = txtz.gather(1, expand_indices(topk_p_indices, txtz.size(-1))) * topk_p_values.unsqueeze(-1)
-
-        # ret = odict(
-        #     # topk_p_values=topk_p_values,
-        #     # topk_p_indices=topk_p_indices,
-        #     presence=presence,
-        #     # sampled_presence=sampled_presence,
-        #     # presence_bottom=presence[topk_complement].view(batchsize, -1),
-        #     scale=scale,
-        #     txtz=txtz,
-        #     z_fg=z_fg,
-        #     is_real=is_real,
-        #     z_bg=z_bg,
-        # )
 
         # Now the viewpoint part
-        x_a = self.head_fc_a(fg)
+        # x_a = self.head_fc_a(fg)
         # x_e = self.head_fc_e(trunk_out)
         # x_t = self.head_fc_t(trunk_out)
+        # z_fg = self.fg_z_linear(fg)
+        fg_loc = self.fg_loc_head(fg)
+        scale = self.scale_linear(fg_loc).clamp(1e-3)
+        presence_logits = self.presence_linear(fg_loc)
+        shift = self.shift_linear(fg_loc).clamp(-0, 1.5)
+        depth = torch.sigmoid(self.depth_linear(fg_loc))
+
+        # tx = self.tx_linear(fg_loc)
+        # tz = self.tz_linear(fg_loc)
 
         # Get magnitude outputs {MAGNITUDE}
-        mag_x2_y2_a = self.head_x2_y2_mag_a(x_a)  # .view(batchsize, 1, 2)
+        # mag_x2_y2_a = self.head_x2_y2_mag_a(x_a)  # .view(batchsize, 1, 2)
         # mag_x2_y2_e = self.head_x2_y2_mag_e(x_e).view(batchsize, 1, 2)
         # mag_x2_y2_t = self.head_x2_y2_mag_t(x_t).view(batchsize, 1, 2)
 
         # Log Softmax on mag outputs {MAGNITUDE}
-        logsoftmax_x2_y2_a = self.logsoftmax(mag_x2_y2_a)
+        # logsoftmax_x2_y2_a = self.logsoftmax(mag_x2_y2_a)
         # logsoftmax_x2_y2_e = self.logsoftmax(mag_x2_y2_e)
         # logsoftmax_x2_y2_t = self.logsoftmax(mag_x2_y2_t)
 
         # Signs/Directions of outputs {SIGN}
-        sign_x_y_a = self.head_sin_cos_direc_a(x_a)  # .view(batchsize, 1, 4)
+        # sign_x_y_a = self.head_sin_cos_direc_a(x_a)  # .view(batchsize, 1, 4)
         # sign_x_y_e = self.head_sin_cos_direc_e(x_e).view(batchsize,1,4)
         # sign_x_y_t = self.head_sin_cos_direc_t(x_t).view(batchsize,1,4)
 
         viewpoint_op = odict(  # log probability of xx, yy   (xx+yy=1 or x^2+y^2=1)
             fg=odict(
-                logprob_xxyy=odict(
-                    a=logsoftmax_x2_y2_a,
-                    # e = logsoftmax_x2_y2_e,
-                    # t = logsoftmax_x2_y2_t,
-                ),
-                sign_x_y=odict(
-                    a=sign_x_y_a,
-                    # e = sign_x_y_e,
-                    # t = sign_x_y_t,
-                ),
+                # logprob_xxyy=odict(
+                #     a=logsoftmax_x2_y2_a,
+                #     # e = logsoftmax_x2_y2_e,
+                #     # t = logsoftmax_x2_y2_t,
+                # ),
+                # sign_x_y=odict(
+                #     a=sign_x_y_a,
+                #     # e = sign_x_y_e,
+                #     # t = sign_x_y_t,
+                # ),
+                presence=torch.sigmoid(presence_logits),
                 presence_logits=presence_logits,
-                # sampled_presence=sampled_presence,
                 # presence_bottom=presence[topk_complement].view(batchsize, -1),
                 scale=scale,
-                txtz=txtz,
-                z_fg=z_fg,
+                shift=shift,
+                depth=depth,
+                # tx=tx,
+                # tz=tz,
+                # z_fg=z_fg,
+                fg_map=fg,
+                fg_loc_map=fg_loc,
             ),
             bg=odict(is_real=is_real, z_bg=z_bg,),
         )
