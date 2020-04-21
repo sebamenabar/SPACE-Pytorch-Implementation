@@ -7,4 +7,4 @@ A model that combines the Self-Supervised Viewpoint Learning from Image Collecti
 
 For training and results please see the space-only notebook.
 
-![space-clevr][images/space-clevr.png]
+![space-clevr](images/space-clevr.png)
