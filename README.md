@@ -15,6 +15,6 @@ Current used files are:
 
 For training and results please see the space-only notebook.
 
-![space-clevr](images/space-clevr.png])
+![space-clevr](images/space-clevr.png)
 Took about 3 epochs to train, ~20 minutes per epoch on a GTX1080Ti. Weights used to generate this image:
 https://drive.google.com/file/d/1F4KIOP2sxXrNFr33w5p1lHvo3daYWBna/view?usp=sharing
